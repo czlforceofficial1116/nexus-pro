@@ -42,16 +42,20 @@ function save(key, value) {
     return false;
   }
 }
+const configuredEndpoint = String(window.REPUBLIC_CONFIG.API_URL || "").trim();
 const settings = read("island-settings", {
-  mode: "local",
-  endpoint: window.REPUBLIC_CONFIG.API_URL || "",
+  mode: configuredEndpoint ? "cloud" : "local",
+  endpoint: configuredEndpoint,
   auth: null,
 });
+if (configuredEndpoint && !settings.auth) settings.endpoint = configuredEndpoint;
 let raw = read("island-demo", null),
   S = null,
   tab = "office",
   selectedRole = "technocrat",
   selectedCounty = "",
+  selectedAvatar = -1,
+  tutorialStep = Number(read("island-tutorial-step", 0)),
   busy = false;
 let pending = read("island-pending", null);
 function localView() {
@@ -166,6 +170,7 @@ async function perform(action) {
   setBusy(true);
   try {
     let result;
+    const beforePhase = S?.phase;
     if (settings.mode === "local") {
       const next = E.act(raw, action);
       raw = next.state;
@@ -184,6 +189,7 @@ async function perform(action) {
       });
       result = data.result;
     }
+    if (tutorialStep < 4 && (action.type === "checkin" && tutorialStep === 0 || action.type === "choose" && ((tutorialStep === 1 && beforePhase === "morning") || (tutorialStep === 2 && beforePhase === "hearing") || (tutorialStep === 3 && beforePhase === "night")))) { tutorialStep++; save("island-tutorial-step", tutorialStep); }
     if (action.type === "draw") drawResult(result);
     else toast(typeof result === "string" ? result : "操作完成");
     render();
@@ -213,7 +219,7 @@ function creationView() {
   return `<section class="creation"><div class="entry-heading"><div><p class="eyebrow">ISLAND / A POLITICAL RPG</p><h1>你的位置，<br><em>決定你看見的真相。</em></h1></div><div class="entry-note"><span class="edition">第一季 · 官印與暗潮</span><p>四種職涯，同一座島。<br>選定地方起點，再走進中央與總統府。</p></div></div>
  <div class="entry-map-grid"><div class="entry-map"><div class="map-heading"><span class="eyebrow">01 / CHOOSE YOUR COUNTY</span><h2>你的政治起點，在地圖上。</h2></div>${countyMap(selectedCounty, true)}<label class="county-picker">選擇縣市（離島與小縣市可用清單）<select id="countySelect" name="countyPicker"><option value="">請選擇一個縣市</option>${Object.entries(E.COUNTIES).map(([id,n])=>`<option value="${id}" ${selectedCounty===id?"selected":""}>${n}</option>`).join("")}</select></label></div><div class="entry-roles"><span class="eyebrow">02 / CHOOSE YOUR ROLE</span><h2>選擇第一份職務</h2><div class="role-grid" role="group" aria-label="選擇起始身分">${E.ROLES.map((x, i) => `<button class="role-card ${selectedRole === x.id ? "selected" : ""}" data-role="${x.id}" aria-pressed="${selectedRole === x.id}">${portrait(i)}<div class="role-overlay"><span class="role-number">0${i + 1} / ${x.tag}</span><h2>${x.name}</h2><span class="role-select">${selectedRole === x.id ? "已選擇身分" : "選擇這個身分"} <span aria-hidden="true">↗</span></span></div></button>`).join("")}</div></div></div>
  <div class="create-panel"><div class="role-detail"><p class="eyebrow">${esc(r.short)} / 起始履歷</p><h2>${selectedCounty ? esc(E.COUNTIES[selectedCounty]) + " · " : ""}${r.name}</h2><p>${r.desc}</p><p class="muted small">${r.power}</p><div class="starting-stats"><span>政治資本 <b>${r.capital}</b></span><span>廉潔 <b>${r.integrity}</b></span><span>地方起薪 <b>$${money(({technocrat:4200,prosecutor:4800,legislator:6800,chair:3200})[r.id])}</b></span></div></div>
- <form id="createForm"><div class="form-row"><label>角色姓名<input name="name" placeholder="輸入你的角色姓名" maxlength="16" required autocomplete="off"></label><label class="age-label">年齡<input name="age" value="42" min="25" max="80" type="number" required></label></div><label>第三勢力黨名<input name="partyName" value="新序黨" maxlength="14" required></label>${settings.mode === "cloud" ? '<label>開局邀請碼<input name="invite" type="password" placeholder="向遊戲管理者取得" required autocomplete="off"></label>' : ""}<button class="primary wide" id="startBtn">建立角色，進入第一天 <span aria-hidden="true">→</span></button><span class="small muted">${settings.mode === "local" ? "本機試玩可直接開始；設定雲端連線後，可另建跨裝置角色。" : "雲端角色將保存至遊戲資料庫，請備份存檔鑰匙。"}</span></form></div>
+ <form id="createForm"><div class="form-row"><label>角色姓名<input name="name" placeholder="輸入你的角色姓名" maxlength="16" required autocomplete="off"></label><label class="age-label">年齡<input name="age" value="42" min="25" max="80" type="number" required></label></div><label>第三勢力黨名<input name="partyName" value="新序黨" maxlength="14" required></label><fieldset class="avatar-picker"><legend>03 / 選擇你的頭像</legend><div class="avatar-choices">${[0,1,2,3].map(i=>`<button type="button" class="avatar-option ${selectedAvatar===i?"selected":""}" data-avatar="${i}" aria-pressed="${selectedAvatar===i}" aria-label="選擇頭像 ${i+1}">${portrait(i)}<span>頭像 ${i+1}</span></button>`).join("")}</div><p class="small muted">頭像與性別可自由搭配；四張肖像皆為原創架空人物。</p></fieldset><fieldset class="gender-picker"><legend>04 / 角色性別</legend><div class="gender-options">${[["woman","女性"],["man","男性"],["nonbinary","非二元"],["undisclosed","不公開"]].map(([id,name])=>`<label><input type="radio" name="gender" value="${id}" required><span>${name}</span></label>`).join("")}</div></fieldset>${settings.mode === "cloud" && window.REPUBLIC_CONFIG.INVITE_REQUIRED ? '<label>開局邀請碼<input name="invite" type="password" placeholder="向管理者取得" required autocomplete="off"></label>' : ""}<button class="primary wide" id="startBtn">建立角色，進入第一天 <span aria-hidden="true">→</span></button><span class="small muted">${settings.mode === "local" ? "本機試玩可直接開始；設定雲端連線後，可另建跨裝置角色。" : "雲端角色將保存至遊戲資料庫，請備份存檔鑰匙。"}</span></form></div>
  <p class="disclaimer">架空政治劇情，人物、政黨、金額與案件均為虛構。制度參考台灣並作遊戲化簡化；所有抽獎只使用遊戲薪資，沒有儲值、兌現或現金獎品。</p></section>`;
 }
 const TABS = [
@@ -229,9 +235,29 @@ function nav() {
 }
 function gameView() {
   const p = S.player;
-  return `<div class="game-shell"><aside class="left-panel"><div class="player-card">${portrait(S.role.portrait, "avatar")}<p class="eyebrow">第 ${S.term} 任期 / DAY ${String(S.day).padStart(2, "0")}</p><h2>${esc(p.name)}</h2><p>${esc(p.office)}</p>${tag(E.partyName(S, p.party))}</div>${nav()}<div class="sidebar-footer"><p>總統 <b>${esc(S.president)}</b></p><p>院長 <b>${esc(S.premier)}</b></p><span>獨立世界 · 每位玩家各自推演</span></div></aside>
+  return `<div class="game-shell"><aside class="left-panel"><div class="player-card">${portrait(S.player.portrait ?? S.role.portrait, "avatar")}<p class="eyebrow">第 ${S.term} 任期 / DAY ${String(S.day).padStart(2, "0")}</p><h2>${esc(p.name)}</h2><p>${esc(p.office)}</p>${tag(E.partyName(S, p.party))}</div>${nav()}<div class="sidebar-footer"><p>總統 <b>${esc(S.president)}</b></p><p>院長 <b>${esc(S.premier)}</b></p><span>獨立世界 · 每位玩家各自推演</span></div></aside>
  <div class="workspace"><div class="workspace-heading"><div><p class="eyebrow">${esc(E.PHASES[S.phase])} / ${S.phase === "morning" ? "08:30" : S.phase === "cabinet" ? "10:00" : S.phase === "hearing" ? "14:00" : "20:30"}</p><h1>${TABS.find((t) => t[0] === tab)[1]}</h1></div><div class="day-stamp"><b>${String(S.day).padStart(2, "0")}</b><span>DAY<br>距投票 ${28 - ((S.day - 1) % 28)} 天</span></div></div>
- <div class="game-map-strip">${countyMap(S.county?.id || "", false)}<div class="map-brief"><span class="eyebrow">${esc(S.county?.name || "你的選區")} · 第 ${S.day} 日</span><h2>${esc(p.office)}</h2><p>地方信任 ${S.county?.trust ?? 52} · 政治資本 ${p.capital} · ${p.careerLevel >= 3 ? "現任總統" : p.careerLevel >= 2 ? "中央行政首長" : p.careerLevel >= 1 ? "中央職位" : "地方政治起點"}</p><button data-tab="election">查看下一場選舉 →</button></div></div>${nationStats()}<div class="content-grid"><section class="primary-content" id="panel">${{ office: officeView, cases: casesView, people: peopleView, election: electionView, blackwater: blackwaterView, archive: archiveView }[tab]()}</section><aside class="right-panel">${accountView()}${parliamentView()}<div class="aside-note"><span class="eyebrow">今日提醒</span><p>${esc(S.appointment ? "人事出缺中。查核履歷後再提出任命建議。" : S.nation.reserve < 6 ? "備轉低於 6%，低電力韌性正在拖累民調。" : S.player.risk >= 65 ? "涉案風險偏高，派系的承諾不等於司法免責。" : "每天簽到領薪，再依時段處理議程。選戰與道具不會推進時鐘。")}</p></div></aside></div></div></div>`;
+ ${tutorialView()}<div class="game-map-strip">${countyMap(S.county?.id || "", false)}<div class="map-brief"><span class="eyebrow">${esc(S.county?.name || "你的選區")} · 第 ${S.day} 日</span><h2>${esc(p.office)}</h2><p>地方信任 ${S.county?.trust ?? 52} · 政治資本 ${p.capital} · ${p.careerLevel >= 3 ? "現任總統" : p.careerLevel >= 2 ? "中央行政首長" : p.careerLevel >= 1 ? "中央職位" : "地方政治起點"}</p><button data-tab="election">查看下一場選舉 →</button></div></div>${nationStats()}${missionView()}<div class="content-grid"><section class="primary-content" id="panel">${{ office: officeView, cases: casesView, people: peopleView, election: electionView, blackwater: blackwaterView, archive: archiveView }[tab]()}</section><aside class="right-panel">${accountView()}${parliamentView()}<div class="aside-note"><span class="eyebrow">今日提醒</span><p>${esc(S.appointment ? "人事出缺中。查核履歷後再提出任命建議。" : S.nation.reserve < 6 ? "備轉低於 6%，低電力韌性正在拖累民調。" : S.player.risk >= 65 ? "涉案風險偏高，派系的承諾不等於司法免責。" : "每天簽到領薪，再依時段處理議程。選戰與道具不會推進時鐘。")}</p></div></aside></div></div></div>`;
+}
+const GUIDE = [
+  ["晨間簽到","每天先簽到領取合法薪水。薪水可抽道具，也能投入選戰。現在到「今日議程」按簽到。"],
+  ["批示公文","先讀清楚每個選項的代價。選一項公文處置，國庫、廉潔與證據可能因此改變。"],
+  ["迎戰國會","質詢不只是文字選項。提出證據有成功率；道具可以增加交鋒勝算。"],
+  ["追查晚間案件","晚間決定揭弊、切割或同流合污。結束後會進入下一天，限時任務也會倒數。"],
+];
+function tutorialView() {
+  const phaseStep = S.day>1 ? 4 : S.phase==="night" ? 3 : S.phase==="hearing" || S.phase==="cabinet" ? 2 : S.checked ? 1 : 0;
+  if (tutorialStep < phaseStep) {tutorialStep=phaseStep; save("island-tutorial-step",tutorialStep);}
+  if(tutorialStep>=4) return `<button class="how-to" data-action="help">玩法指南 / 再看一次教學</button>`;
+  const [title,body]=GUIDE[tutorialStep];
+  return `<section class="tutorial-panel" aria-label="新手教學"><div><span>新手教學 ${tutorialStep+1} / 4</span><h2>${title}</h2><p>${body}</p></div><div class="tutorial-actions"><button class="primary" data-action="guideFocus">帶我到議程</button><button data-action="guideSkip">略過教學</button></div></section>`;
+}
+function helpView() { modal(`<div class="help-page"><p class="eyebrow">FIELD GUIDE / 遊戲指南</p><h2>一個遊戲日，三場攻防。</h2><ol><li><b>上午：</b>簽到領薪、審公文；每七天加入行政院會。</li><li><b>下午：</b>在立法院提出證據、協商預算或接受政治交易。失手可能使預算被凍結。</li><li><b>晚間：</b>追查四條弊案。揭弊能收集證據，包庇會積累涉案風險。</li><li><b>限時任務：</b>三天內完成三個行動；成功有支援，逾期會出現政治代價。</li><li><b>長線目標：</b>累積地方信任與聲望，參選地方首長或立委，晉升中央，最後挑戰總統選舉。</li></ol><p>每次決定前看「成功率」與「國家數值」。政治黑水道具只使用遊戲薪資，沒有儲值或兌現。</p><button class="primary" data-close>回到議程</button></div>`); }
+function missionView() {
+  const m=S.mission;
+  if(!m) return "";
+  const t=m.info;
+  return `<section class="mission-panel ${m.status}"><div class="mission-header"><span>限時政治任務 / LIVE</span><b>${m.status==="active" ? `剩 ${Math.max(0,m.deadline-S.day+1)} 天` : m.status==="won" ? "已達成" : "已逾期"}</b></div><h2>${esc(t.title)}</h2><p>${esc(t.lead)}</p><div class="mission-goals">${t.goal.map((g,i)=>`<span class="${m.flags[i]?"done":""}">${m.flags[i]?"完成":"待辦"} · ${esc(g)}</span>`).join("")}</div><div class="mission-stakes"><span>完成：${Object.entries(t.reward).map(([k,v])=>`${LABELS[k]||k} ${v>0?"+":""}${v}`).join("／")}</span><span>逾期：${Object.entries(t.penalty).map(([k,v])=>`${LABELS[k]||k} ${v>0?"+":""}${v}`).join("／")}</span></div></section>`;
 }
 function nationStats() {
   const n = S.nation;
@@ -331,9 +357,7 @@ function drawResult(ids) {
   );
 }
 function settingsView() {
-  modal(
-    `<div class="settings"><p class="eyebrow">SAVE & CONNECTION</p><h2>帶著你的任期繼續走。</h2><div class="button-row"><button data-action="switchLocal" class="${settings.mode === "local" ? "primary" : ""}">本機試玩</button><button data-action="switchCloud" class="${settings.mode === "cloud" ? "primary" : ""}">雲端角色</button></div><form id="connectionForm"><label>Apps Script 網頁應用程式網址<input name="endpoint" type="url" value="${esc(settings.endpoint)}" placeholder="https://script.google.com/macros/s/…/exec" required></label><button>儲存連線網址</button></form>${settings.mode === "cloud" ? `<hr><h3>雲端存檔鑰匙</h3><p class="small muted">鑰匙等同這份存檔的登入憑證，請私下保存。不要貼到公開 GitHub。</p>${settings.auth ? '<div class="button-row"><button data-action="exportKey">下載存檔鑰匙</button><button data-action="loadCloud">重新載入</button></div>' : ""}<form id="restoreForm"><label>在另一台裝置繼續<textarea name="key" rows="3" placeholder="貼上鑰匙檔案中的完整 JSON" required></textarea></label><button>載入雲端角色</button></form>` : '<hr><div class="button-row"><button data-action="exportLocal" ' + (!raw ? "disabled" : "") + '>匯出本機存檔</button><button data-action="importLocal">匯入本機存檔</button></div><input type="file" id="importFile" accept="application/json,.json" hidden><p class="small muted">本機與雲端是獨立角色。清除瀏覽器資料前，請先匯出本機存檔。</p>'}${pending ? '<div class="warning">有一筆待確認操作。<button data-action="retry">重試待確認操作</button></div>' : ""}<hr><button data-action="newGame">另建新角色</button></div>`,
-  );
+  modal(`<div class="settings"><p class="eyebrow">SAVE / GUIDE</p><h2>你的任期，會自動保存。</h2><p>同一台裝置下次開啟會自動續玩。換裝置時下載並妥善保管存檔鑰匙。</p><button class="primary" data-action="help">開啟玩法指南</button><hr><div class="button-row"><button data-action="switchLocal" class="${settings.mode==="local"?"primary":""}">本機試玩</button><button data-action="switchCloud" class="${settings.mode==="cloud"?"primary":""}" ${!endpointValid(settings.endpoint)?"disabled":""}>雲端存檔</button></div>${configuredEndpoint ? '<p class="small muted">伺服器已由網站管理者設定，玩家不用輸入網址。</p>' : `<details><summary>管理者連線設定</summary><form id="connectionForm"><label>Apps Script /exec 網址<input name="endpoint" type="url" value="${esc(settings.endpoint)}" required></label><button>儲存網站連線</button></form></details>`}${settings.mode==="cloud" ? `<hr><h3>換裝置繼續</h3><p class="small muted">鑰匙可登入這份存檔，請勿公開。</p>${settings.auth ? '<div class="button-row"><button data-action="exportKey">下載存檔鑰匙</button><button data-action="loadCloud">重新載入</button></div>' : ""}<label class="key-file-label">或選擇存檔鑰匙檔案<input type="file" id="keyFile" accept="application/json,.json"></label><form id="restoreForm"><label>另一台裝置的鑰匙內容<textarea name="key" rows="3" required></textarea></label><button>載入角色</button></form>` : `<hr><div class="button-row"><button data-action="exportLocal" ${raw?"":"disabled"}>匯出本機存檔</button><button data-action="importLocal">匯入本機存檔</button></div><input type="file" id="importFile" accept="application/json,.json" hidden>`}${pending?'<div class="warning">有一筆操作待確認。<button data-action="retry">重試待確認操作</button></div>':""}<hr><button data-action="newGame">另建新角色</button></div>`);
 }
 function download(name, data) {
   const url = URL.createObjectURL(
@@ -364,8 +388,12 @@ async function createCharacter(form) {
     partyName: fd.get("partyName"),
     role: selectedRole,
     countyId: selectedCounty,
+    portrait: selectedAvatar,
+    gender: fd.get("gender"),
   };
   if (!selectedCounty) return toast("請先在地圖或縣市清單選擇你的起點");
+  if (selectedAvatar < 0) return toast("請先選擇角色頭像");
+  if (!character.gender) return toast("請先選擇角色性別");
   setBusy(true);
   try {
     if (settings.mode === "local") {
@@ -387,6 +415,7 @@ async function createCharacter(form) {
       S = d.state;
     }
     tab = "office";
+    tutorialStep = 0; save("island-tutorial-step", 0);
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
     toast("角色已建立。第一天，請完成晨間簽到。");
@@ -398,6 +427,9 @@ async function createCharacter(form) {
 }
 async function otherAction(action, button) {
   if (busy) return;
+  if (action === "guideSkip") { tutorialStep=4; save("island-tutorial-step",4); render(); return; }
+  if (action === "guideFocus") { tab="office"; render(); document.querySelector(".scene")?.scrollIntoView({behavior:"smooth",block:"start"}); return; }
+  if (action === "help") return helpView();
   const simple = ["checkin", "submitVetting", "donate", "central", "premier", "resign"];
   if (simple.includes(action)) {
     closeModal();
@@ -440,6 +472,8 @@ async function otherAction(action, button) {
   if (action === "confirmNew") {
     if (pending) return toast("請先確認待處理的雲端操作");
     S = null;
+    selectedAvatar = -1;
+    tutorialStep = 0; save("island-tutorial-step", 0);
     settings.auth = null;
     save("island-settings", settings);
     closeModal();
@@ -508,6 +542,12 @@ document.addEventListener("click", (e) => {
   if (!b) return;
   if (b.dataset.close !== undefined) {
     closeModal();
+    return;
+  }
+  if (b.dataset.avatar !== undefined) {
+    const form = $("#createForm"); const remembered = form ? Object.fromEntries(new FormData(form)) : {};
+    selectedAvatar = Number(b.dataset.avatar); render();
+    Object.entries(remembered).forEach(([k,v])=>{const el=$("#createForm").elements[k]; if(el) el.value=v;});
     return;
   }
   if (b.dataset.role) {
@@ -589,6 +629,17 @@ document.addEventListener("change", async (e) => {
     const remembered = form ? Object.fromEntries(new FormData(form)) : {};
     selectedCounty = e.target.value; render();
     Object.entries(remembered).forEach(([k,v]) => { const el = $("#createForm").elements[k]; if(el) el.value = v; });
+    return;
+  }
+  if (e.target.id === "keyFile") {
+    const file=e.target.files?.[0]; if(!file) return;
+    try {
+      if(file.size>5000) throw new Error("檔案過大");
+      const value=JSON.parse(await file.text());
+      if(typeof value!=="object" || !value.token || !value.playerId) throw new Error("不是存檔鑰匙");
+      $("#restoreForm textarea").value=JSON.stringify(value);
+      toast("已讀取鑰匙；按「載入角色」完成換裝置續玩。");
+    } catch(err) {toast("無法讀取鑰匙："+err.message);}
     return;
   }
   if (e.target.id !== "importFile") return;

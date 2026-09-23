@@ -306,6 +306,26 @@
       portrait: i === 1 ? 0 : i === 2 ? 3 : 2,
     }));
   }
+  const MISSION_TEMPLATES = [
+    {title:"海岬斷電倒數", lead:"風場驗收疑點擴大。三天內完成審查、國會答詢與保全證據，否則電力調度將受衝擊。", goal:["退回公文查核", "在立法院以證據答詢成功", "晚間公開保全線索"], reward:{reserve:0.8,budget:30,reputation:5}, penalty:{reserve:-0.8,crisis:6,poll:-3}},
+    {title:"地方利益鏈倒數", lead:"人事、標案與地方派系互相施壓。三天內守住審查與國會監督，避免弊案持續擴散。", goal:["要求公開審查", "在立法院以證據答詢成功", "晚間公開保全線索"], reward:{budget:45,capital:7,poll:2}, penalty:{poll:-5,risk:8,capital:-4}},
+  ];
+  function newMission(day) {
+    return {start:day, deadline:day+2, template:Math.floor((day-1)/3)%MISSION_TEMPLATES.length, flags:[false,false,false], status:"active"};
+  }
+  function progressMission(s, phase, choice, hearingWin) {
+    const m=s.mission;
+    if (!m || m.status!=="active") return;
+    if (phase==="morning" && choice==="review") m.flags[0]=true;
+    if (phase==="hearing" && choice==="evidence" && hearingWin) m.flags[1]=true;
+    if (phase==="night" && choice==="expose") m.flags[2]=true;
+    if (m.flags.every(Boolean)) {
+      m.status="won";
+      const t=MISSION_TEMPLATES[m.template];
+      delta(s,t.reward);
+      log(s,"限時任務達成：「"+t.title+"」。國家獲得支援，地方也記住了你的選擇。","mission");
+    }
+  }
   function create(input, seed) {
     const r = ROLES.find((x) => x.id === input.role);
     assert(r, "請選擇起始身分");
@@ -326,6 +346,10 @@
       chair: countyName + "地方黨部主席",
     }[r.id];
     const startingSalary = {technocrat:4200,prosecutor:4800,legislator:6800,chair:3200}[r.id];
+    const gender = String(input.gender || "undisclosed");
+    assert(["woman", "man", "nonbinary", "undisclosed"].includes(gender), "請選擇性別");
+    const portraitId = Number(input.portrait);
+    assert(Number.isInteger(portraitId) && portraitId >= 0 && portraitId <= 3, "請選擇頭像");
     const party = String(input.partyName || "新序黨").trim();
     assert(party.length >= 1 && party.length <= 14, "黨名需 1–14 字");
     const s = {
@@ -342,6 +366,8 @@
       player: {
         name,
         age,
+        gender,
+        portrait: portraitId,
         role: r.id,
         office: startingOffice,
         careerLevel: 0,
@@ -392,6 +418,7 @@
         result: null,
       },
       ai: null,
+      mission: newMission(1),
       ending: null,
     };
     log(s, "你接下這份職務。第一封公文已經壓在桌上，國會也排好了今天的議程。");
@@ -717,8 +744,15 @@
     else if (s.phase === "cabinet") s.phase = "hearing";
     else if (s.phase === "hearing") s.phase = "night";
     else {
+      if (s.mission?.status==="active" && s.day>=s.mission.deadline) {
+        const t=MISSION_TEMPLATES[s.mission.template];
+        s.mission.status="lost";
+        delta(s,t.penalty);
+        log(s,"限時任務失敗：「"+t.title+"」。政治代價已反映在國家數值。","mission");
+      }
       if (s.day % 28 === 0) resolveElection(s);
       s.day++;
+      if (s.day%3===1) s.mission=newMission(s.day);
       s.phase = "morning";
       s.checked = false;
       s.hearingBoost = 0;
@@ -792,6 +826,8 @@
     assert(s.player.cash + (o.effect.cash || 0) >= 0, "薪資帳戶餘額不足");
     assert(!o.blocked, "可動支預算不足，請先解凍或暫緩支出");
     const before = { ...s.nation, ...s.player };
+    const phaseBefore = s.phase;
+    let hearingWin = false;
     delta(s, o.effect);
     if (s.phase === "morning" || s.phase === "night") {
       const trustDelta = id === "review" || id === "expose" ? 3 : id === "favor" || id === "collude" ? -6 : id === "shelve" ? -4 : 0;
@@ -809,6 +845,7 @@
       if (id === "evidence") {
         const win = rand(s) * 100 < o.chance;
         if (win) {
+          hearingWin = true;
           s.nation.frozen = Math.max(0, s.nation.frozen - 40);
           delta(s, { reputation: 5, poll: 2 });
           msg += "資料站得住腳，凍結款解除 40 億。";
@@ -847,6 +884,7 @@
         if (c.stage >= 3) closeCase(s, c);
       }
     }
+    progressMission(s, phaseBefore, id, hearingWin);
     const after = { ...s.nation, ...s.player };
     const diffs = {};
     Object.keys(o.effect).forEach((k) => {
@@ -1209,6 +1247,7 @@
   }
   function act(state, action) {
     const s = clone(state);
+    if (!s.mission) s.mission = newMission(s.day);
     assert(!s.ending, "本局已結束，請建立新的角色");
     let result;
     switch (action.type) {
@@ -1306,6 +1345,8 @@
     if (s.appointment)
       s.appointment.candidates = s.appointment.candidates.map(redact);
     s.ministers = s.ministers.map(redact);
+    if (!s.mission) s.mission=newMission(s.day);
+    s.mission.info=clone(MISSION_TEMPLATES[s.mission.template]);
     s.scene = scene(state);
     s.role = clone(role(state));
     return s;
